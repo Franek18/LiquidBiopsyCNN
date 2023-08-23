@@ -35,7 +35,7 @@ hparams = {
                     "ES_tolerance": 10
                 },
                 # FlatCnn hparams
-                "FlatCnn": {
+                "FlatCNN": {
                     "Dropout": 0.2,
                     "lr": 1e-1,
                     "weight_decay": 0.0001,
@@ -49,7 +49,7 @@ hparams = {
                     "ES_tolerance": 10
                 },
                 # VanillaCnn hparams
-                "VanillaCnn": {
+                "VanillaCNN": {
                     "Dropout": 0.2,
                     "lr": 1e-1,
                     "weight_decay": 0.0001,
@@ -63,7 +63,7 @@ hparams = {
                     "ES_tolerance": 10
                 },
                 # HybridCnn hparams
-                "HybridCnn": {
+                "HybridCNN": {
                     "Dropout": 0.2,
                     "lr": 1e-1,
                     "weight_decay": 0.0001,

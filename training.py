@@ -1,4 +1,3 @@
-
 import copy
 import time
 import datetime
@@ -6,10 +5,10 @@ import torch
 import wandb
 import numpy as np
 import pandas as pd
-import torchvision.models as models
 
 from torch import nn
 from tqdm import tqdm
+from torchsummary import summary
 from torch.optim import lr_scheduler
 from torch.utils.data import DataLoader
 from models import VanillaCNN, FlatCNN, HybridCNN
@@ -26,7 +25,7 @@ def train_model(model, num_epochs, dataloaders, optimizer, criterion, scheduler,
     best_model = copy.deepcopy(model.state_dict())
     # validation balanced accuracy
     best_auc = 0.0
-
+    best_bal_acc = 0.0
     best_epoch = 0
 
     global device
@@ -99,7 +98,7 @@ def train_model(model, num_epochs, dataloaders, optimizer, criterion, scheduler,
             # auc = roc_auc_score(all_labels, all_outputs, average='weighted', multi_class='ovo')
 
             # log_file.write('{} Loss: {:.4f} Auc: {:.4f}\n'.format(phase, epoch_loss, auc))
-            # wandb.log({f"{phase} Loss": loss, f"{phase} AUC": auc, f"{phase} Bal Acc": bal_acc, "epoch": epoch})
+            # wandb.log({f"{phase} Fold {fold} Loss": loss, f"{phase} Fold {fold} AUC": auc, f"{phase} Fold {fold} Bal Acc": bal_acc, "epoch": epoch})
             if phase == "train":
                 train_bal_accs[epoch, fold] = bal_acc
                 train_aucs[epoch, fold] = auc
@@ -169,10 +168,52 @@ def test(model, dataloader, size, criterion, fold):
 
     # return test_loss, test_auc
 
-# def report_metrics():
+def report_metrics(best_epochs):
+    global train_bal_accs, train_aucs, train_losses
+    global val_bal_accs, val_aucs, val_losses
+    global test_bal_acc, test_auc, test_loss
 
+    mean_best_train_bal_acc = np.mean([train_bal_accs[best_epoch][i] for i, best_epoch in enumerate(best_epochs)])
+    mean_best_train_auc = np.mean([train_aucs[best_epoch][i] for i, best_epoch in enumerate(best_epochs)])
 
-def training_loop(model_type, class_weights, datasets, y_train, hparams):
+    mean_best_val_bal_acc = np.mean([val_bal_accs[best_epoch][i] for i, best_epoch in enumerate(best_epochs)])
+    mean_best_val_auc = np.mean([val_aucs[best_epoch][i] for i, best_epoch in enumerate(best_epochs)])
+
+    std_best_train_bal_acc = np.std([train_bal_accs[best_epoch][i] for i, best_epoch in enumerate(best_epochs)])
+    std_best_train_auc = np.std([train_aucs[best_epoch][i] for i, best_epoch in enumerate(best_epochs)])
+
+    std_best_val_bal_acc = np.std([val_bal_accs[best_epoch][i] for i, best_epoch in enumerate(best_epochs)])
+    std_best_val_auc = np.std([val_aucs[best_epoch][i] for i, best_epoch in enumerate(best_epochs)])
+
+    std_test_bal_acc = np.std(test_bal_acc)
+    std_test_auc = np.std(test_auc)
+
+    run_results = pd.DataFrame({
+        "train_bal_acc": mean_best_train_bal_acc,
+        "train_auc": mean_best_train_auc,
+        "val_bal_acc": mean_best_val_bal_acc,
+        "val_auc": mean_best_val_auc,
+        "test_bal_acc": 0,
+        "test_auc": 0
+    }, index=[0])
+
+    # wandb.log({"Mean Test Loss": np.mean(test_loss), "Mean Test AUC": np.mean(test_auc),
+    #            "Mean Test Bal Acc": np.mean(test_bal_acc)})
+    # wandb.log({"Test Bal Acc std": std_test_bal_acc, "Test AUC std": std_test_auc})
+    #
+    # wandb.log({"Mean Train AUC": mean_best_train_auc, "Mean Train Bal Acc": mean_best_train_bal_acc,
+    #            "Train Bal Acc std": std_best_train_bal_acc, "Train AUC std": std_best_train_auc})
+    #
+    # wandb.log({"Mean Val AUC": mean_best_val_auc, "Mean Val Bal Acc": mean_best_val_bal_acc,
+    #            "Val Bal Acc std": std_best_val_bal_acc, "Val AUC std": std_best_val_auc})
+
+    for i in range(100):
+        wandb.log({f"Train Loss": np.mean(train_losses[i]), f"Train AUC": np.mean(train_aucs[i]), f"Train Bal Acc": np.mean(train_bal_accs[i]), "epoch": i + 1})
+        wandb.log({f"Val Loss": np.mean(val_losses[i]), f"Val  AUC": np.mean(val_aucs[i]), f"Val Bal Acc": np.mean(val_bal_accs[i]), "epoch": i + 1})
+
+    return run_results
+
+def training_loop(standard, model_type, class_weights, datasets, y_train, hparams):
     no_folds = 5
     skf = StratifiedKFold(n_splits=no_folds)
 
@@ -194,6 +235,8 @@ def training_loop(model_type, class_weights, datasets, y_train, hparams):
 
     best_epochs = []
 
+
+
     # for fold, (train_ids, val_ids) in enumerate(skf.split(np.zeros(len(y_train)), y_train)):
     for fold, (train_ids, val_ids) in tqdm(enumerate(skf.split(np.zeros(len(y_train)), y_train)),
                                            desc=f"{no_folds}-fold cross-validation"):
@@ -202,9 +245,9 @@ def training_loop(model_type, class_weights, datasets, y_train, hparams):
         if model_type == "Flat":
             model = FlatCNN().to(device)
         elif model_type == "Hybrid":
-            model = HybridCNN().to(device)
+            model = HybridCNN(standard).to(device)
         else:
-            model = VanillaCNN().to(device)
+            model = VanillaCNN(standard).to(device)
 
         # Loss function and optimizer
         loss_fn = nn.CrossEntropyLoss(class_weights.to(device))
@@ -251,34 +294,11 @@ def training_loop(model_type, class_weights, datasets, y_train, hparams):
         # test
         test(fold_model, testloader, test_size, loss_fn, fold)
 
-    mean_best_train_bal_acc = np.mean([train_bal_accs[best_epoch][i] for i, best_epoch in enumerate(best_epochs)])
-    mean_best_train_auc = np.mean([train_aucs[best_epoch][i] for i, best_epoch in enumerate(best_epochs)])
+    run_results = report_metrics(best_epochs)
 
-    mean_best_val_bal_acc = np.mean([val_bal_accs[best_epoch][i] for i, best_epoch in enumerate(best_epochs)])
-    mean_best_val_auc = np.mean([val_aucs[best_epoch][i] for i, best_epoch in enumerate(best_epochs)])
+    run_results["test_bal_acc"] = np.mean(test_bal_acc)
+    run_results["test_auc"] = np.mean(test_auc)
 
-    std_best_train_bal_acc = np.std([train_bal_accs[best_epoch][i] for i, best_epoch in enumerate(best_epochs)])
-    std_best_train_auc = np.std([train_aucs[best_epoch][i] for i, best_epoch in enumerate(best_epochs)])
-
-    std_best_val_bal_acc = np.std([val_bal_accs[best_epoch][i] for i, best_epoch in enumerate(best_epochs)])
-    std_best_val_auc = np.std([val_aucs[best_epoch][i] for i, best_epoch in enumerate(best_epochs)])
-
-    std_test_bal_acc = np.std(test_bal_acc)
-    std_test_auc = np.std(test_auc)
-
-    wandb.log({"Mean Test Loss": np.mean(test_loss), "Mean Test AUC": np.mean(test_auc),
-               "Mean Test Bal Acc": np.mean(test_bal_acc)})
-    wandb.log({"Test Bal Acc std": std_test_bal_acc, "Test AUC std": std_test_auc})
-
-    wandb.log({"Mean Train AUC": mean_best_train_auc, "Mean Train Bal Acc": mean_best_train_bal_acc,
-               "Train Bal Acc std": std_best_train_bal_acc, "Train AUC std": std_best_train_auc})
-
-    wandb.log({"Mean Val AUC": mean_best_val_auc, "Mean Val Bal Acc": mean_best_val_bal_acc,
-               "Val Bal Acc std": std_best_val_bal_acc, "Val AUC std": std_best_val_auc})
-
-    for i in range(100):
-        wandb.log({f"Train Loss": np.mean(train_losses[i]), f"Train AUC": np.mean(train_aucs[i]), f"Train Bal Acc": np.mean(train_bal_accs[i]), "epoch": i + 1})
-        wandb.log({f"Val Loss": np.mean(val_losses[i]), f"Val  AUC": np.mean(val_aucs[i]), f"Val Bal Acc": np.mean(val_bal_accs[i]), "epoch": i + 1})
-
+    return run_results
 
     #torch.save(best_model, "best_model.pt")
