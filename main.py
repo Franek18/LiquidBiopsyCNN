@@ -20,8 +20,8 @@ if __name__ == '__main__':
     # parse arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", help="Select type of Model", default='vanilla', type=str)
-    parser.add_argument("--data", help="Select type data split", default='standard', type=str)
-    parser.add_argument("--test", help="Select type data split", default='random', type=str)
+    parser.add_argument("--data", help="Select type of data's representation", default='standard', type=str)
+    parser.add_argument("--test", help="Select type data's split", default='random', type=str)
     args = parser.parse_args()
     project_name = None
     standard = False
@@ -48,6 +48,15 @@ if __name__ == '__main__':
         model_hparams = hparams["HybridCNN"]
         project_name = "HybridCNN" + "_" + data_type + '_' + args.test + "_" + str(datetime.date.today())
         wandb.init(project="mgr_biopsy", name=project_name)
+    elif args.model == "Resnet":
+        model_type = "Resnet18"
+        model_hparams = hparams["ResNet18"]
+        data_type = args.data
+        if data_type == "standard":
+            standard = True
+            dataset = CancerDataset("biopsy/biopsy_data2.pt", "biopsy/biopsy_labels.npy")
+        else:
+            dataset = CancerDataset("biopsy/new_biopsy_data_matrices.pt", "biopsy/biopsy_labels.npy")
     else:
         # model = VanillaCNN()
         model_type = "Vanilla"
